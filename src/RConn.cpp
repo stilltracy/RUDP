@@ -25,11 +25,11 @@ RConn * RConn::listening_rconn=NULL;
 
 /*used by listening peer*/
 RConn::RConn() {
-	// TODO Auto-generated constructor stub
-	//rxBuffer=new Buffer();
 	lock_rx_buffer=PTHREAD_MUTEX_INITIALIZER;
 	lock_sendable=PTHREAD_MUTEX_INITIALIZER;
 	sendable=true;
+	lock_recv_interrupted=PTHREAD_MUTEX_INITIALIZER;
+	recv_interrupted=false;
 	port=0;
 	ip="0.0.0.0";
 	config=DEFAULT_CONFIG;
@@ -44,7 +44,10 @@ RConn::RConn(string ip, int port)
 {
 	this->lock_rx_buffer=PTHREAD_MUTEX_INITIALIZER;
 	this->lock_sendable=PTHREAD_MUTEX_INITIALIZER;
+
 	this->sendable=true;
+	this->lock_recv_interrupted=PTHREAD_MUTEX_INITIALIZER;
+	this->recv_interrupted=false;
 	this->ip=ip;
 	this->port=port;
 
@@ -190,7 +193,7 @@ Packet * RConn::recv_next_packet()
 	pthread_mutex_unlock(&this->lock_rx_buffer);
 	return p;
 }
-void RConn::disable_sender()
+void RConn::disable_send()
 {
 	pthread_mutex_lock(&lock_sendable);
 	sendable=false;
@@ -300,6 +303,12 @@ void RConn::send_fin2(int seq)
 {
 
 }
+void RConn::disable_recv()
+{
+	pthread_mutex_lock(&this->lock_recv_interrupted);
+	this->recv_interrupted=true;
+	pthread_mutex_unlock(&this->lock_recv_interrupted);
+}
 bool RConn::is_sendable()
 {
 	int ret=false;
@@ -311,9 +320,7 @@ bool RConn::is_sendable()
 /* called by the receiver thread upon receiving FIN*/
 void RConn::on_close(int fin_seq)
 {
-
-	//TODO: deal with the case when the recv() thread is blocked at this moment
-	disable_sender();
+	this->disable_send();
 	this->send_ack(fin_seq);
 	this->send_fin2(this->localSeq);
 	ErrorCode err=ErrorCode::SUCCESS;
@@ -332,6 +339,7 @@ void RConn::on_close(int fin_seq)
 	{
 		perror("No ACK to FIN-ACK received.");
 	}
+	this->disable_recv();
 	this->state=RConnState::CLOSED;
 }
 int RConn::send(unsigned char * buffer, int size)
@@ -368,6 +376,13 @@ int RConn::recv(unsigned char * buffer, int size)
 	gettimeofday(&start,NULL);
 	while(true)
 	{
+		pthread_mutex_lock(&this->lock_recv_interrupted);
+		if(this->recv_interrupted)
+		{
+			ret=0;
+			break;
+		}
+		pthread_mutex_unlock(&this->lock_recv_interrupted);
 		if((p=this->recv_next_packet())!=NULL
 				&&this->remoteSeq==p->parse_hdr()->sequence)
 		{

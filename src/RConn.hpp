@@ -41,6 +41,8 @@ private:
 	Buffer * rx_buffer;
 	pthread_mutex_t lock_sendable;
 	bool sendable;
+	pthread_mutex_t lock_recv_interrupted;
+	bool recv_interrupted;
 	unsigned int localSeq;
 	unsigned int remoteSeq;
 	static void initStatic();
@@ -63,7 +65,8 @@ private:
 	void send_packet(Packet * p);
 	Packet * recv_next_packet();
 	void on_close(int seq);
-	void disable_sender();
+	void disable_send();
+	void disable_recv();
 	bool is_sendable();
 public:
 	RConn();
