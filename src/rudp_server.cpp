@@ -12,9 +12,8 @@ using namespace rudp;
 
 int main() {
 	cout << "RUDP test!" << endl; // prints RUDP test!
-	string ip="127.0.0.1";
 	int port =9527;
-	int status=0;
+	//int status=0;
 	if(bind(port)==-1)
 	{
 		perror("bind() failure.");
@@ -24,7 +23,15 @@ int main() {
 	if(conn==NULL)
 		cout<<"accept failed!"<<endl;
 	else
+	{
 		cout<<"accept success!"<<endl;
+		unsigned char buf[10240];
+		int size=conn->recv(buf,10240);
+		cout<<"received. size="<<size<<endl;
+		cout<<buf<<endl;
+		delete conn;
+	}
+
 	return 0;
 }
 

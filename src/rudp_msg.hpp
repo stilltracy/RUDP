@@ -19,9 +19,10 @@ typedef struct rudp_msg_hdr{
 } RUDPMsgHdr;
 typedef enum rudp_msg_type{
 	MSG_TYPE_SYN,
-	MSG_TYPE_SYN_ACK,
+	//MSG_TYPE_SYN_ACK,
 	MSG_TYPE_ACK,
-	MSG_TYPE_FIN,
+	MSG_TYPE_FIN1,
+	MSG_TYPE_FIN2,
 	MSG_TYPE_DATA
 } RUDPMsgType;
 const char rudp_magic[4]={'R','U','D','P'};

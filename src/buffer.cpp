@@ -6,47 +6,62 @@
  */
 
 #include "buffer.hpp"
+#include <iostream>
 namespace rudp{
-Buffer::Buffer(int maxVolume)
+Buffer::Buffer(void * owner,int maxVolume)
 {
-	this->buffers=NULL;
+	this->lock=PTHREAD_MUTEX_INITIALIZER;
+	this->packets=NULL;
 	this->size=0;
 	this->maxVolume=maxVolume;
+	this->owner=owner;
 }
 Buffer::~Buffer()
 {
 
 }
-//TODO: needs to be atomic
+void * Buffer::getOwner()
+{
+	return this->owner;
+}
 Packet * Buffer::getPacket()
 {
+	pthread_mutex_lock(&this->lock);
 	Packet * p=NULL;
-	if(this->buffers!=NULL)
+	if(this->packets!=NULL)
 	{
-		p=this->buffers;
-		this->buffers=p->next;
+		p=this->packets;
+		this->packets=p->next;
 	}
+	pthread_mutex_unlock(&this->lock);
 	return p;
 }
-//TODO: needs to be atomic
-ErrorCode Buffer::putPacket(unsigned char * buf, int size)
+
+ErrorCode Buffer::putPacket(Packet * nb)
 {
+	pthread_mutex_lock(&this->lock);
 	ErrorCode code=ErrorCode::SUCCESS;
-	if(this->size+size>this->maxVolume)
+
+	if(this->size+nb->size>this->maxVolume)
 	{
 		code=ErrorCode::BUFFER_FULL;
 	}
 	else
 	{
-		/*insert into the head of the buffer list*/
-
-		Packet * nb=new Packet(size);
-		memcpy(nb->buf,buf,size);
-		nb->next=this->buffers;
-		this->buffers=nb;
+		/*insert into the tail of the buffer list*/
+		if(this->packets==NULL)
+			this->packets=nb;
+		else
+		{
+			Packet * p=this->packets;
+			for(;p->next!=NULL;p=p->next);
+			p->next=nb;
+		}
 	}
+	pthread_mutex_unlock(&this->lock);
 	return code;
 }
+
 }
 
 
