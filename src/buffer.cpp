@@ -39,6 +39,7 @@ Packet * Buffer::getPacket()
 	{
 		p=this->packets;
 		this->packets=p->next;
+		this->size-=p->size;
 	}
 	pthread_mutex_unlock(&this->lock);
 	return p;
@@ -58,12 +59,15 @@ ErrorCode Buffer::putPacket(Packet * nb)
 	{
 		/*insert into the tail of the buffer list*/
 		if(this->packets==NULL)
+		{
 			this->packets=nb;
+			this->size+=nb->size;
 		else
 		{
 			Packet * p=this->packets;
 			for(;p->next!=NULL;p=p->next);
 			p->next=nb;
+			this->size+=nb->size;
 		}
 	}
 	pthread_mutex_unlock(&this->lock);
