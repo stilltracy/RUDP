@@ -83,7 +83,10 @@ RConn::~RConn() {
 	}
 	pthread_mutex_unlock(&lock_conn_count);
 	wipe_static_traces();
-	delete rx_buffer;
+	pthread_mutex_lock(&lock_rx_buffer);
+	if(rx_buffer!=NULL)
+		delete rx_buffer;
+	pthread_mutex_unlock(&lock_rx_buffer);
 }
 void RConn::send_syn(unsigned int seq)
 {
@@ -278,24 +281,29 @@ void * RConn::receiver(void * args)
 				//TODO: needs to set the maximum age for a buffer that isn't associated with a connection
 
 				pthread_mutex_lock(&RConn::lock_listening_rconn);
-				pthread_mutex_lock(&RConn::listening_rconn->lock_rx_buffer);
-				if(RConn::listening_rconn->rx_buffer==NULL)
+				if(RConn::listening_rconn!=NULL)
 				{
-					buffer=new Buffer(RConn::listening_rconn,DEFAULT_CONFIG->BUFFER_MAX_VOLUME);
-					RConn::listening_rconn->rx_buffer=buffer;
-				}
-				else
-				{
-					buffer=RConn::listening_rconn->rx_buffer;
-				}
-				buffer_router[addr]=buffer;
+					pthread_mutex_lock(&RConn::listening_rconn->lock_rx_buffer);
+					if(RConn::listening_rconn->rx_buffer==NULL)
+					{
+						buffer=new Buffer(RConn::listening_rconn,DEFAULT_CONFIG->BUFFER_MAX_VOLUME);
+						RConn::listening_rconn->rx_buffer=buffer;
+					}
+					else
+					{
+						buffer=RConn::listening_rconn->rx_buffer;
+					}
+					buffer_router[addr]=buffer;
 
-				pthread_mutex_unlock(&RConn::listening_rconn->lock_rx_buffer);
-				char buf_ip[16];
-				const char * ip_cstr=inet_ntop(AF_INET,&si_client.sin_addr.s_addr,buf_ip,sizeof(si_client));
-				RConn::listening_rconn->ip=string(ip_cstr);
-				RConn::listening_rconn->port=htons(si_client.sin_port);
-				RConn::listening_rconn->remote_addr=addr;
+					pthread_mutex_unlock(&RConn::listening_rconn->lock_rx_buffer);
+
+					char buf_ip[16];
+					const char * ip_cstr=inet_ntop(AF_INET,&si_client.sin_addr.s_addr,buf_ip,sizeof(si_client));
+					RConn::listening_rconn->ip=string(ip_cstr);
+					RConn::listening_rconn->port=htons(si_client.sin_port);
+					RConn::listening_rconn->remote_addr=addr;
+
+				}
 				pthread_mutex_unlock(&RConn::lock_listening_rconn);
 			}
 			else
@@ -303,25 +311,33 @@ void * RConn::receiver(void * args)
 				buffer=it->second;
 			}
 			pthread_mutex_unlock(&RConn::lock_buffer_router);
-
-			if(p->is_fin1())
+			if(buffer!=NULL)
 			{
-				RConn * conn=(RConn *)buffer->getOwner();
-				conn->on_close(p->parse_hdr()->sequence);
-				//TODO: free structures corresponding to conn inside the receiver thread
+				if(p->is_fin1())
+				{
+					RConn * conn=(RConn *)buffer->getOwner();
+					conn->on_close(p->parse_hdr()->sequence);
+					//TODO: free structures corresponding to conn inside the receiver thread
+				}
+				else
+				{
+					buffer->putPacket(p);
+				}
 			}
 			else
 			{
-				buffer->putPacket(p);
+				delete p;
 			}
 		}
 
 		/*check whether the receiver should die at this point*/
+		pthread_mutex_lock(&lock_receiver_alive);
 		if(!receiver_alive)//die happily
 		{
 			on_receiver_exit();//die elegantly
 			break;
 		}
+		pthread_mutex_unlock(&lock_receiver_alive);
 	}
 	delete[] buf;
 	pthread_exit(NULL);
