@@ -18,7 +18,14 @@ Buffer::Buffer(void * owner,int maxVolume)
 }
 Buffer::~Buffer()
 {
-
+	Packet *p =this->packets;
+	Packet *last=NULL;
+	while(p!=NULL)
+	{
+		last=p;
+		p=p->next;
+		delete last;
+	}
 }
 void * Buffer::getOwner()
 {
@@ -36,7 +43,7 @@ Packet * Buffer::getPacket()
 	pthread_mutex_unlock(&this->lock);
 	return p;
 }
-
+/* this method is responsible for freeing nb*/
 ErrorCode Buffer::putPacket(Packet * nb)
 {
 	pthread_mutex_lock(&this->lock);
@@ -45,6 +52,7 @@ ErrorCode Buffer::putPacket(Packet * nb)
 	if(this->size+nb->size>this->maxVolume)
 	{
 		code=ErrorCode::BUFFER_FULL;
+		delete nb;
 	}
 	else
 	{

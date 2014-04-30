@@ -30,6 +30,7 @@ int main() {
 		unsigned char msg[13]="hello,world!";
 		int size=conn->send(msg,13);
 		cout<<"sent. size="<<size<<endl;
+		close(conn);
 		delete conn;
 	}
 	return 0;

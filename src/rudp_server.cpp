@@ -19,6 +19,8 @@ int main() {
 		perror("bind() failure.");
 		return -1;
 	}
+
+
 	RConn * conn=accept(port);
 	if(conn==NULL)
 		cout<<"accept failed!"<<endl;
@@ -29,7 +31,14 @@ int main() {
 		int size=conn->recv(buf,10240);
 		cout<<"received. size="<<size<<endl;
 		cout<<buf<<endl;
-		delete conn;
+		while(true)
+		if(conn->is_closed())
+		{
+			cout<<"connection closed!"<<endl;
+			break;
+		}
+
+
 	}
 
 	return 0;

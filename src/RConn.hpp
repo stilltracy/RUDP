@@ -21,17 +21,19 @@
 namespace rudp {
 using namespace std;
 
+
 class RConn {
 private:
-
+	static pthread_mutex_t lock_conn_count;
+	static int conn_count;
 	static int socket_fd;//all the connections share the same UDP socket
 	static pthread_mutex_t lock_buffer_router;
 	static map<in_addr_t, Buffer *> buffer_router;
 	static pthread_mutex_t lock_listening_rconn;
 	static RConn * listening_rconn;
-
 	string ip;
 	int port;
+	in_addr_t remote_addr;
 	static pthread_t t_receiver;
 	static pthread_mutex_t lock_receiver_alive;
 	static bool receiver_alive;
@@ -45,33 +47,36 @@ private:
 	bool recv_interrupted;
 	unsigned int localSeq;
 	unsigned int remoteSeq;
-	static void initStatic();
-	void send_syn(int seq);
-	void send_fin1(int seq);
-	void send_fin2(int seq);
-	ErrorCode recv_msg(RUDPMsgType type, unsigned int expectedSeq, unsigned char * buf);
+	void send_control_msg(RUDPMsgType type,unsigned int seq);
+	void send_syn(unsigned int seq);
+	void send_fin1(unsigned int seq);
+	void send_fin2(unsigned int seq);
+	ErrorCode recv_control_msg(RUDPMsgType type, unsigned int expected_seq);
+	ErrorCode recv_control_msg(RUDPMsgType type, unsigned int expected_seq, unsigned int * p_remote_seq);
 	ErrorCode recv_syn(unsigned int seq);
-	ErrorCode recv_msg_timeout(RUDPMsgType type,unsigned int expectedSeq,int timeout);
-	ErrorCode recv_ack(unsigned int expectedSeq);
+	ErrorCode recv_control_msg_timeout(RUDPMsgType type,unsigned int expected_seq,int timeout);
+	ErrorCode recv_control_msg_timeout(RUDPMsgType type,unsigned int expected_seq,unsigned int * p_remote_seq,int timeout);
+	ErrorCode recv_ack(unsigned int expected_seq);
+	ErrorCode recv_fin2(unsigned int * remote_seq);
 	int set_nonblocking();
 	int set_blocking();
-	bool check_timeout(int timeout, struct timeval start);
-	void recvToConn();
-
+	bool check_timeout(__suseconds_t timeout, struct timeval start);
 	void startReceiver();
 	void endReceiver();
 	static void * receiver(void * args);
-	void send_ack(int seq);
+	void send_ack(unsigned int seq);
 	void send_packet(Packet * p);
 	Packet * recv_next_packet();
-	void on_close(int seq);
+	void on_close(unsigned int seq);
 	void disable_send();
 	void disable_recv();
 	bool is_sendable();
+	void wipe_static_traces();
 public:
 	RConn();
 	RConn(string ip,int port);
 	virtual ~RConn();
+	bool is_closed();
 	int send(unsigned char * buffer, int size);
 	int recv(unsigned char * buffer, int size);
 	friend void close(RConn * rconn);

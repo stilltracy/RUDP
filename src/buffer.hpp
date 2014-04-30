@@ -65,7 +65,7 @@ public:
 		return (RUDPMsgHdr *)this->buf;
 
 	}
-	RUDPMsgHdr * make_msg(int type,int seq, unsigned char * body)
+	RUDPMsgHdr * make_msg(int type,unsigned int seq, unsigned char * body)
 	{
 		RUDPMsgHdr * hdr=(RUDPMsgHdr *)buf;
 		memcpy(hdr->magic,rudp_magic,4);

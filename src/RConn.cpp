@@ -14,6 +14,10 @@
 #include <sys/socket.h>
 namespace rudp {
 using namespace std;
+
+/*Initialization of static variables*/
+pthread_mutex_t RConn::lock_conn_count=PTHREAD_MUTEX_INITIALIZER;
+int RConn::conn_count=0;
 int RConn::socket_fd=socket(AF_INET,SOCK_DGRAM, IPPROTO_UDP);
 map<in_addr_t, Buffer *> RConn::buffer_router;
 pthread_mutex_t RConn::lock_buffer_router=PTHREAD_MUTEX_INITIALIZER;
@@ -25,6 +29,10 @@ RConn * RConn::listening_rconn=NULL;
 
 /*used by listening peer*/
 RConn::RConn() {
+	pthread_mutex_lock(&lock_conn_count);
+		conn_count++;
+	pthread_mutex_unlock(&lock_conn_count);
+	memset(&remote_addr,0,sizeof(remote_addr));
 	lock_rx_buffer=PTHREAD_MUTEX_INITIALIZER;
 	lock_sendable=PTHREAD_MUTEX_INITIALIZER;
 	sendable=true;
@@ -42,6 +50,10 @@ RConn::RConn() {
 /*called by connecting peer*/
 RConn::RConn(string ip, int port)
 {
+	pthread_mutex_lock(&lock_conn_count);
+		conn_count++;
+	pthread_mutex_unlock(&lock_conn_count);
+	memset(&remote_addr,0,sizeof(remote_addr));
 	this->lock_rx_buffer=PTHREAD_MUTEX_INITIALIZER;
 	this->lock_sendable=PTHREAD_MUTEX_INITIALIZER;
 
@@ -59,17 +71,30 @@ RConn::RConn(string ip, int port)
 	startReceiver();
 }
 RConn::~RConn() {
-	endReceiver();
+	pthread_mutex_lock(&lock_conn_count);
+	if(conn_count<=0)
+	{
+		conn_count=0;
+		endReceiver();
+	}
+	else
+	{
+		conn_count--;
+	}
+	pthread_mutex_unlock(&lock_conn_count);
+	wipe_static_traces();
 	delete rx_buffer;
 }
-void RConn::send_syn(int seq)
+void RConn::send_syn(unsigned int seq)
 {
-	Packet * p =new Packet(sizeof(RUDPMsgHdr));
-	p->make_msg(MSG_TYPE_SYN,seq,NULL);
-	send_packet(p);
-	delete p;
+	send_control_msg(MSG_TYPE_SYN,seq);
 }
-ErrorCode RConn::recv_msg(RUDPMsgType type, unsigned int expectedSeq, unsigned char * buf)
+ErrorCode RConn::recv_control_msg(RUDPMsgType type, unsigned int expected_seq)
+{
+	return recv_control_msg(type,expected_seq,NULL);
+}
+/*If p_remote_req is not NULL, the value of expected_seq is ignored*/
+ErrorCode RConn::recv_control_msg(RUDPMsgType type, unsigned int expected_seq, unsigned int * p_remote_seq)
 {
 	 ErrorCode err=ErrorCode::SUCCESS;
 	 while(true)
@@ -80,12 +105,10 @@ ErrorCode RConn::recv_msg(RUDPMsgType type, unsigned int expectedSeq, unsigned c
 		 RUDPMsgHdr * hdr=packet->parse_hdr();
 		 if(hdr!=NULL)
 		 {
-			 if(hdr->type==type&&hdr->sequence==expectedSeq)
+			 if(hdr->type==type&&(p_remote_seq!=NULL||hdr->sequence==expected_seq))
 			 {
-				 if(type==MSG_TYPE_DATA)
-				 {
-					 memcpy(buf,hdr->body,hdr->size);
-				 }
+				 if(p_remote_seq!=NULL)
+					 *p_remote_seq=hdr->sequence;
 				 delete packet;
 				 break;//no body for copying
 			 }
@@ -95,9 +118,13 @@ ErrorCode RConn::recv_msg(RUDPMsgType type, unsigned int expectedSeq, unsigned c
 	 }
 	 return err;
 }
-ErrorCode RConn::recv_syn(unsigned int expectedSeq)
+ErrorCode RConn::recv_syn(unsigned int expected_seq)
 {
-	return recv_msg(MSG_TYPE_SYN,expectedSeq,NULL);
+	return recv_control_msg(MSG_TYPE_SYN,expected_seq);
+}
+ErrorCode RConn::recv_fin2(unsigned int * remote_seq)
+{
+	return recv_control_msg_timeout(MSG_TYPE_FIN2,0,remote_seq,config->RECV_FIN2_TIMEOUT);
 }
 int RConn::set_nonblocking()
 {
@@ -113,7 +140,7 @@ int RConn::set_blocking()
 		flags = 0;
 	return fcntl(socket_fd, F_SETFL, flags &~O_NONBLOCK);
 }
-bool RConn::check_timeout(int timeout, struct timeval start)
+bool RConn::check_timeout(__suseconds_t timeout, struct timeval start)
 {
 	struct timeval cur;
 	gettimeofday(&cur,NULL);
@@ -121,7 +148,8 @@ bool RConn::check_timeout(int timeout, struct timeval start)
 		return true;
 	return false;
 }
-ErrorCode RConn::recv_msg_timeout(RUDPMsgType type,unsigned int expectedSeq,int timeout)
+/*If p_remote_req is not NULL, the value of expected_seq is ignored*/
+ErrorCode RConn::recv_control_msg_timeout(RUDPMsgType type,unsigned int expected_seq,unsigned int * p_remote_seq,int timeout)
 {
 	 ErrorCode err=ErrorCode::SUCCESS;
 	 //set_nonblocking();
@@ -140,9 +168,10 @@ ErrorCode RConn::recv_msg_timeout(RUDPMsgType type,unsigned int expectedSeq,int 
 		 RUDPMsgHdr * hdr=packet->parse_hdr();
 		 if(hdr!=NULL)
 		 {
-			 if(hdr->type==type&&hdr->sequence==expectedSeq)
+			 if(hdr->type==type&&(p_remote_seq!=NULL||hdr->sequence==expected_seq))
 			 {
-
+				 if(p_remote_seq!=NULL)
+					 *p_remote_seq=hdr->sequence;
 				 delete packet;
 				 break;//no body for copying
 			 }
@@ -153,10 +182,10 @@ ErrorCode RConn::recv_msg_timeout(RUDPMsgType type,unsigned int expectedSeq,int 
 	 //set_blocking();
 	 return err;
 }
- ErrorCode RConn::recv_ack(unsigned int expectedSeq)
+ ErrorCode RConn::recv_ack(unsigned int expected_seq)
 {
-	 //return recv_msg(MSG_TYPE_ACK,expectedSeq,NULL);
-	 return recv_msg_timeout(MSG_TYPE_ACK,expectedSeq,config->CONNECT_TIMEOUT);
+	 //return recv_msg(MSG_TYPE_ACK,expected_seq,NULL);
+	 return recv_control_msg_timeout(MSG_TYPE_ACK,expected_seq,NULL,config->CONNECT_TIMEOUT);
 }
 void RConn::startReceiver()
 {
@@ -253,6 +282,7 @@ void * RConn::receiver(void * args)
 				const char * ip_cstr=inet_ntop(AF_INET,&si_client.sin_addr.s_addr,buf_ip,sizeof(si_client));
 				RConn::listening_rconn->ip=string(ip_cstr);
 				RConn::listening_rconn->port=htons(si_client.sin_port);
+				RConn::listening_rconn->remote_addr=addr;
 				pthread_mutex_unlock(&RConn::lock_listening_rconn);
 			}
 			else
@@ -295,13 +325,20 @@ void RConn::send_packet(Packet * p)
 		perror("sendto() failure.");
 	}
 }
-void RConn::send_fin1(int seq)
+void RConn::send_control_msg(RUDPMsgType type,unsigned int seq)
 {
-
+	Packet * p =new Packet(sizeof(RUDPMsgHdr));
+	p->make_msg(type,seq,NULL);
+	send_packet(p);
+	delete p;
 }
-void RConn::send_fin2(int seq)
+void RConn::send_fin1(unsigned int seq)
 {
-
+	send_control_msg(MSG_TYPE_FIN1,seq);
+}
+void RConn::send_fin2(unsigned int seq)
+{
+	send_control_msg(MSG_TYPE_FIN2,seq);
 }
 void RConn::disable_recv()
 {
@@ -318,15 +355,15 @@ bool RConn::is_sendable()
 	return ret;
 }
 /* called by the receiver thread upon receiving FIN*/
-void RConn::on_close(int fin_seq)
+void RConn::on_close(unsigned int fin_seq)
 {
 	this->disable_send();
 	this->send_ack(fin_seq);
 	this->send_fin2(this->localSeq);
 	ErrorCode err=ErrorCode::SUCCESS;
-	for(int i=0;i<this->config->ACCEPT_MAX_RETRIES;i++)
+	for(int i=0;i<this->config->CLOSE_MAX_RETRIES;i++)
 	{
-		err=this->recv_msg_timeout(MSG_TYPE_ACK,this->localSeq,this->config->CLOSE_TIMEOUT);
+		err=this->recv_control_msg_timeout(MSG_TYPE_ACK,this->localSeq,NULL,this->config->CLOSE_TIMEOUT);
 		if(err==ErrorCode::SUCCESS)
 			break;
 		else
@@ -340,7 +377,25 @@ void RConn::on_close(int fin_seq)
 		perror("No ACK to FIN-ACK received.");
 	}
 	this->disable_recv();
+	this->wipe_static_traces();
 	this->state=RConnState::CLOSED;
+
+}
+void RConn::wipe_static_traces()
+{
+	pthread_mutex_lock(&lock_buffer_router);
+	buffer_router.erase(this->remote_addr);
+	pthread_mutex_unlock(&lock_buffer_router);
+	pthread_mutex_lock(&lock_listening_rconn);
+	if(listening_rconn==this)
+	{
+		listening_rconn=NULL;
+	}
+	pthread_mutex_unlock(&lock_listening_rconn);
+}
+bool RConn::is_closed()
+{
+	return this->state==RConnState::CLOSED;
 }
 int RConn::send(unsigned char * buffer, int size)
 {
@@ -405,13 +460,9 @@ int RConn::recv(unsigned char * buffer, int size)
 	delete p;
 	return ret;
 }
-void RConn::send_ack(int seq)
+void RConn::send_ack(unsigned int seq)
 {
-	Packet * p =new Packet(sizeof(RUDPMsgHdr));
-	p->make_msg(MSG_TYPE_ACK,seq,NULL);
-	send_packet(p);
-	delete p;
-
+	send_control_msg(MSG_TYPE_ACK,seq);
 }
 RConn * connect(string ip, int port, int * status)
 {
@@ -457,7 +508,7 @@ RConn * accept(int port)
 	ErrorCode err=ErrorCode::SUCCESS;
 	for(int i=0;i<conn->config->ACCEPT_MAX_RETRIES;i++)
 	{
-		err=conn->recv_msg_timeout(MSG_TYPE_ACK,1,conn->config->CONNECT_TIMEOUT);
+		err=conn->recv_control_msg_timeout(MSG_TYPE_ACK,1,NULL,conn->config->CONNECT_TIMEOUT);
 		if(err==ErrorCode::SUCCESS)
 			break;
 		else
@@ -491,6 +542,33 @@ int bind(int port)
 }
 void close(RConn * rconn)
 {
-
+	rconn->disable_send();
+	unsigned int local_seq=rconn->localSeq;
+	rconn->send_fin1(local_seq);
+	ErrorCode err=ErrorCode::SUCCESS;
+	for(int i=0;i<rconn->config->CLOSE_MAX_RETRIES;i++)
+	{
+		err=rconn->recv_ack(local_seq);
+		if(err==ErrorCode::SUCCESS)
+			break;
+		else
+			rconn->send_fin1(local_seq);
+	}
+	if(err!=ErrorCode::SUCCESS)
+	{
+		perror("No ACK for FIN1 received.");
+	}
+	unsigned int seq=0;
+	err=rconn->recv_fin2(&seq);
+	if(err!=ErrorCode::SUCCESS)
+	{
+		perror("No FIN2 received.");
+	}
+	else
+	{
+		rconn->send_ack(seq);
+	}
+	//TODO: disable sender and receiver
+	rconn->disable_recv();
 }
 } /* namespace rudp */
