@@ -10,7 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include "RConn.hpp"
-#include <sys/types.h>          /* See NOTES */
+#include <sys/types.h>
 #include <sys/socket.h>
 namespace rudp {
 using namespace std;
@@ -142,7 +142,7 @@ int RConn::set_blocking()
 }
 bool RConn::check_timeout(__suseconds_t timeout, struct timeval start)
 {
-	struct timeval cur;
+	struct timeval cur={0,0};
 	gettimeofday(&cur,NULL);
 	if(cur.tv_usec-start.tv_usec>=timeout||cur.tv_sec-start.tv_sec>timeout/1000000)
 		return true;
@@ -153,7 +153,7 @@ ErrorCode RConn::recv_control_msg_timeout(RUDPMsgType type,unsigned int expected
 {
 	 ErrorCode err=ErrorCode::SUCCESS;
 	 //set_nonblocking();
-	 struct timeval start;
+	 struct timeval start={0,0};
 	 gettimeofday(&start,NULL);
 	 while(true)
 	 {
@@ -228,6 +228,18 @@ void RConn::disable_send()
 	sendable=false;
 	pthread_mutex_unlock(&lock_sendable);
 }
+void RConn::on_receiver_exit()
+{
+	pthread_mutex_lock(&lock_listening_rconn);
+	listening_rconn=NULL;
+	pthread_mutex_unlock(&lock_listening_rconn);
+	pthread_mutex_lock(&lock_conn_count);
+	conn_count=0;
+	pthread_mutex_unlock(&lock_conn_count);
+	pthread_mutex_lock(&lock_buffer_router);
+	buffer_router.clear();
+	pthread_mutex_unlock(&lock_buffer_router);
+}
 void * RConn::receiver(void * args)
 {
 	//RConn * conn=(RConn *)args;
@@ -250,6 +262,7 @@ void * RConn::receiver(void * args)
 			Packet * p =new Packet(buf,size);
 			if(!p->validate())//illegal msg
 			{
+				delete p;
 				continue;
 			}
 
@@ -306,6 +319,7 @@ void * RConn::receiver(void * args)
 		/*check whether the receiver should die at this point*/
 		if(!receiver_alive)//die happily
 		{
+			on_receiver_exit();//die elegantly
 			break;
 		}
 	}

@@ -31,10 +31,14 @@ int main() {
 		int size=conn->recv(buf,10240);
 		cout<<"received. size="<<size<<endl;
 		cout<<buf<<endl;
+		unsigned char msg[13]="hello,dlrow!";
+		size=conn->send(msg,13);
+		cout<<"sent. size="<<size<<endl;
 		while(true)
 		if(conn->is_closed())
 		{
 			cout<<"connection closed!"<<endl;
+			delete conn;
 			break;
 		}
 

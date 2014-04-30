@@ -64,10 +64,12 @@ private:
 	void startReceiver();
 	void endReceiver();
 	static void * receiver(void * args);
+	static void on_receiver_exit();
 	void send_ack(unsigned int seq);
 	void send_packet(Packet * p);
 	Packet * recv_next_packet();
 	void on_close(unsigned int seq);
+
 	void disable_send();
 	void disable_recv();
 	bool is_sendable();
