@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <cstdio>
 #include <cstring>
+#include <sstream>
 #include "RConn.hpp"
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -16,14 +17,17 @@ namespace rudp {
 using namespace std;
 
 /*Initialization of static variables*/
+
 pthread_mutex_t RConn::lock_conn_count=PTHREAD_MUTEX_INITIALIZER;
 int RConn::conn_count=0;
 int RConn::socket_fd=socket(AF_INET,SOCK_DGRAM, IPPROTO_UDP);
-map<in_addr_t, Buffer *> RConn::buffer_router;
+map<string, Buffer *> RConn::buffer_router;
 pthread_mutex_t RConn::lock_buffer_router=PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t RConn::lock_receiver_alive=PTHREAD_MUTEX_INITIALIZER;
 bool RConn::receiver_alive=false;
 pthread_t RConn::t_receiver=-1;
+//pthread_mutex_t RConn::lock_connecting_rconn=PTHREAD_MUTEX_INITIALIZER;
+//RConn * RConn::connecting_rconn=NULL;
 pthread_mutex_t RConn::lock_listening_rconn=PTHREAD_MUTEX_INITIALIZER;
 RConn * RConn::listening_rconn=NULL;
 
@@ -32,7 +36,9 @@ RConn::RConn() {
 	pthread_mutex_lock(&lock_conn_count);
 		conn_count++;
 	pthread_mutex_unlock(&lock_conn_count);
-	memset(&remote_addr,0,sizeof(remote_addr));
+	//memset(&remote_addr,0,sizeof(remote_addr));
+	lock_syn_buffer=PTHREAD_MUTEX_INITIALIZER;
+	syn_buffer=new Buffer(this,DEFAULT_CONFIG->SYN_BUFFER_MAX_VOLUME);
 	lock_rx_buffer=PTHREAD_MUTEX_INITIALIZER;
 	lock_sendable=PTHREAD_MUTEX_INITIALIZER;
 	sendable=true;
@@ -42,6 +48,7 @@ RConn::RConn() {
 	ip="0.0.0.0";
 	config=DEFAULT_CONFIG;
 	rx_buffer=new Buffer(this,config->BUFFER_MAX_VOLUME);
+	//rx_buffer=NULL;
 	state=RConnState::VOID;
 	localSeq=0;
 	remoteSeq=0;
@@ -53,7 +60,9 @@ RConn::RConn(string ip, int port)
 	pthread_mutex_lock(&lock_conn_count);
 		conn_count++;
 	pthread_mutex_unlock(&lock_conn_count);
-	memset(&remote_addr,0,sizeof(remote_addr));
+	//memset(&remote_addr,0,sizeof(remote_addr));
+	lock_syn_buffer=PTHREAD_MUTEX_INITIALIZER;
+	syn_buffer=new Buffer(this,DEFAULT_CONFIG->SYN_BUFFER_MAX_VOLUME);
 	this->lock_rx_buffer=PTHREAD_MUTEX_INITIALIZER;
 	this->lock_sendable=PTHREAD_MUTEX_INITIALIZER;
 
@@ -68,6 +77,12 @@ RConn::RConn(string ip, int port)
 	localSeq=0;
 	remoteSeq=0;
 	this->state=RConnState::CONNECTING;
+	stringstream ss;
+	ss<<port;
+	this->buffer_key=ip+ss.str();
+	pthread_mutex_lock(&lock_buffer_router);
+	buffer_router[buffer_key]=rx_buffer;
+	pthread_mutex_unlock(&lock_buffer_router);
 	startReceiver();
 }
 RConn::~RConn() {
@@ -121,9 +136,38 @@ ErrorCode RConn::recv_control_msg(RUDPMsgType type, unsigned int expected_seq, u
 	 }
 	 return err;
 }
+Packet * RConn::get_syn_packet()
+{
+	pthread_mutex_lock(&lock_listening_rconn);
+	pthread_mutex_lock(&this->lock_syn_buffer);
+	/*ip and port should have been filled by the receiver() before putting the packet on syn_buffer*/
+	Packet * p=syn_buffer->getPacket(MSG_TYPE_SYN,this->ip,this->port);
+	pthread_mutex_unlock(&this->lock_syn_buffer);
+	pthread_mutex_unlock(&lock_listening_rconn);
+	return p;
+}
 ErrorCode RConn::recv_syn(unsigned int expected_seq)
 {
-	return recv_control_msg(MSG_TYPE_SYN,expected_seq);
+	//return recv_control_msg(MSG_TYPE_SYN,expected_seq);
+	ErrorCode err=ErrorCode::SUCCESS;
+	 while(true)
+	 {
+		 Packet * packet=get_syn_packet();
+		 if(packet==NULL)
+			 continue;
+		 RUDPMsgHdr * hdr=packet->parse_hdr();
+		 if(hdr!=NULL)
+		 {
+			 if(hdr->sequence==expected_seq)
+			 {
+				 delete packet;
+				 break;//no body for copying
+			 }
+
+		 }
+		 delete packet;
+	 }
+	 return err;
 }
 ErrorCode RConn::recv_fin2(unsigned int * remote_seq)
 {
@@ -252,6 +296,64 @@ void RConn::on_receiver_exit()
 	buffer_router.clear();
 	pthread_mutex_unlock(&lock_buffer_router);
 }
+void RConn::on_syn_received(Packet * p)
+{
+	pthread_mutex_lock(&lock_listening_rconn);
+	listening_rconn->ip=p->ip;
+	listening_rconn->port=p->port;
+	pthread_mutex_lock(&listening_rconn->lock_syn_buffer);
+	listening_rconn->syn_buffer->putPacket(p);
+	pthread_mutex_unlock(&listening_rconn->lock_syn_buffer);
+	pthread_mutex_unlock(&lock_listening_rconn);
+}
+/*caller to this must have held lock_buffer_router*/
+Buffer * RConn::find_rx_buffer(RConn * conn,string key)
+{
+	Buffer * buffer=NULL;
+	pthread_mutex_lock(&conn->lock_rx_buffer);
+	if(conn->rx_buffer==NULL)
+	{
+		buffer=new Buffer(conn,DEFAULT_CONFIG->BUFFER_MAX_VOLUME);
+		conn->rx_buffer=buffer;
+	}
+	else
+	{
+		buffer=conn->rx_buffer;
+	}
+	buffer_router[key]=buffer;
+
+	pthread_mutex_unlock(&conn->lock_rx_buffer);
+
+	return buffer;
+}
+Buffer * RConn::find_buffer(string key,string ip_str, int port)
+{
+	pthread_mutex_lock(&RConn::lock_buffer_router);
+	map<string,Buffer *>::iterator it=buffer_router.find(key);
+	Buffer * buffer=NULL;
+	if(it==buffer_router.end())//allocate a buffer for the address
+	{
+		pthread_mutex_lock(&RConn::lock_listening_rconn);
+		if(RConn::listening_rconn!=NULL)
+		{
+			/*after this, an entry for the rx_buffer will have been created in buffer_router*/
+			buffer =find_rx_buffer(RConn::listening_rconn,key);
+
+			RConn::listening_rconn->ip=ip_str;
+			RConn::listening_rconn->port=port;
+				//RConn::listening_rconn->remote_addr=addr;
+			RConn::listening_rconn->buffer_key=key;
+		}
+		pthread_mutex_unlock(&RConn::lock_listening_rconn);
+	}
+	else
+	{
+		buffer=it->second;
+	}
+	pthread_mutex_unlock(&RConn::lock_buffer_router);
+	return buffer;
+}
+
 void * RConn::receiver(void * args)
 {
 	//RConn * conn=(RConn *)args;
@@ -277,49 +379,21 @@ void * RConn::receiver(void * args)
 				delete p;
 				continue;
 			}
-
-
-			in_addr_t addr=si_client.sin_addr.s_addr;
-			//todo: support multiple connections with the same IP
-
-			pthread_mutex_lock(&RConn::lock_buffer_router);
-			map<in_addr_t,Buffer *>::iterator it=buffer_router.find(addr);
-			Buffer * buffer=NULL;
-			if(it==buffer_router.end())//allocate a buffer for the address
+			char buf_ip[16];
+			const char * ip_cstr=inet_ntop(AF_INET,&si_client.sin_addr.s_addr,buf_ip,sizeof(si_client));
+			stringstream ss;
+			ss<<htons(si_client.sin_port);
+			string key=string(ip_cstr)+ss.str();
+			if(p->is_syn())
 			{
-				//TODO: needs to set the maximum age for a buffer that isn't associated with a connection
-
-				pthread_mutex_lock(&RConn::lock_listening_rconn);
-				if(RConn::listening_rconn!=NULL)
-				{
-					pthread_mutex_lock(&RConn::listening_rconn->lock_rx_buffer);
-					if(RConn::listening_rconn->rx_buffer==NULL)
-					{
-						buffer=new Buffer(RConn::listening_rconn,DEFAULT_CONFIG->BUFFER_MAX_VOLUME);
-						RConn::listening_rconn->rx_buffer=buffer;
-					}
-					else
-					{
-						buffer=RConn::listening_rconn->rx_buffer;
-					}
-					buffer_router[addr]=buffer;
-
-					pthread_mutex_unlock(&RConn::listening_rconn->lock_rx_buffer);
-
-					char buf_ip[16];
-					const char * ip_cstr=inet_ntop(AF_INET,&si_client.sin_addr.s_addr,buf_ip,sizeof(si_client));
-					RConn::listening_rconn->ip=string(ip_cstr);
-					RConn::listening_rconn->port=htons(si_client.sin_port);
-					RConn::listening_rconn->remote_addr=addr;
-
-				}
-				pthread_mutex_unlock(&RConn::lock_listening_rconn);
+				p->ip=string(ip_cstr);
+				p->port=htons(si_client.sin_port);
+				on_syn_received(p);
+				//delete p;
+				continue;
 			}
-			else
-			{
-				buffer=it->second;
-			}
-			pthread_mutex_unlock(&RConn::lock_buffer_router);
+
+			Buffer * buffer=find_buffer(key,string(ip_cstr),htons(si_client.sin_port));
 			if(buffer!=NULL)
 			{
 				if(p->is_fin1())
@@ -424,7 +498,7 @@ void RConn::on_close(unsigned int fin_seq)
 void RConn::wipe_static_traces()
 {
 	pthread_mutex_lock(&lock_buffer_router);
-	buffer_router.erase(this->remote_addr);
+	buffer_router.erase(this->buffer_key);
 	pthread_mutex_unlock(&lock_buffer_router);
 	pthread_mutex_lock(&lock_listening_rconn);
 	if(listening_rconn==this)
@@ -508,9 +582,6 @@ void RConn::send_ack(unsigned int seq)
 RConn * connect(string ip, int port, int * status)
 {
 	RConn * conn =new RConn(ip,port);
-	pthread_mutex_lock(&RConn::lock_listening_rconn);
-	RConn::listening_rconn=conn;
-	pthread_mutex_unlock(&RConn::lock_listening_rconn);
 	conn->send_syn(0);
 	ErrorCode err=ErrorCode::SUCCESS;
 	for(int i=0;i<conn->config->CONNECT_MAX_RETRIES;i++)
@@ -524,18 +595,12 @@ RConn * connect(string ip, int port, int * status)
 	if(err!=ErrorCode::SUCCESS)
 	{
 		perror("No SYN_ACK received.");
-		pthread_mutex_lock(&RConn::lock_listening_rconn);
-		RConn::listening_rconn=NULL;
-		pthread_mutex_unlock(&RConn::lock_listening_rconn);
 		return NULL;
 	}
 	conn->send_ack(1);
 	conn->state=RConnState::ESTABLISHED;
 	conn->localSeq=2;
 	conn->remoteSeq=2;
-	pthread_mutex_lock(&RConn::lock_listening_rconn);
-	RConn::listening_rconn=NULL;
-	pthread_mutex_unlock(&RConn::lock_listening_rconn);
 	return conn;
 }
 RConn * accept(int port)

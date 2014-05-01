@@ -31,7 +31,8 @@ void * wait_to_accept(void * args)
 
 int main() {
 	cout << "RUDP test!" << endl; // prints RUDP test!
-	string ip="158.130.24.207";
+	//string ip="158.130.24.207";
+	string ip="127.0.0.1";
 	int port =9526;
 	int remote_port=9527;
 	int status=0;
@@ -51,24 +52,19 @@ int main() {
 	{
 		cout<<"connect success!"<<endl;
 		unsigned char msg[4096]="hello,world!";
-		int size=conn->send(msg,4096);
-		cout<<"sent. size="<<size<<endl;
-		unsigned char buf[10240];
-		size=conn->recv(buf,10240);
-		cout<<"received. size="<<size<<endl;
-		cout<<buf<<endl;
-		size=conn->recv(buf,10240);
-		cout<<"received. size="<<size<<endl;
-		cout<<buf<<endl;
-		size=conn->send(msg,4096);
-		cout<<"sent. size="<<size<<endl;
-		size=conn->recv(buf,10240);
-		cout<<"received. size="<<size<<endl;
-		cout<<buf<<endl;
-		string wtf;
-		cin>>wtf;
-		//close(conn);
-		delete conn;
+		while(true)
+		{
+			cout<<"say something:"<<endl;
+			cin>>msg;
+			int size=conn->send(msg,4096);
+			cout<<"sent. size="<<size<<endl;
+			cout<<"local:"<<msg<<endl;
+			unsigned char buf[10240];
+			size=conn->recv(buf,10240);
+			cout<<"received. size="<<size<<endl;
+			cout<<"remote:"<<buf<<endl;
+		}
+
 	}
 	return 0;
 }

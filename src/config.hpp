@@ -22,6 +22,7 @@ public:
 	int CLOSE_MAX_RETRIES;
 	int BUFFER_MAX_VOLUME;//maximum buffer of 10KB per connection
 	unsigned int RECEIVER_BUFFER_MAX_VOLUME;//maximum buffer of 100KB for the receiver
+	unsigned int SYN_BUFFER_MAX_VOLUME;//maximum buffer of 128B per connection
 	Config();
 	~Config();
 

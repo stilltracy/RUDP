@@ -43,31 +43,20 @@ int main() {
 	while(conn==NULL);
 	cout<<"conn get created!"<<endl;
 
-	unsigned char buf[10240];
-	int size=conn->recv(buf,10240);
-	cout<<"received. size="<<size<<endl;
-	cout<<buf<<endl;
-	unsigned char msg[4096]="hello,dlrow!";
-	size=conn->send(msg,4096);
-	cout<<"sent. size="<<size<<endl;
-	msg[0]='w';
-	size=conn->send(msg,4096);
-	cout<<"sent. size="<<size<<endl;
-	size=conn->recv(buf,10240);
-	cout<<"received. size="<<size<<endl;
-	cout<<buf<<endl;
-	size=conn->send(msg,4096);
-	cout<<"sent. size="<<size<<endl;
 	while(true)
-	if(conn->is_closed())
 	{
-		cout<<"connection closed!"<<endl;
-		delete conn;
-		break;
+		cout<<"waiting for remote to say something:"<<endl;
+		unsigned char buf[10240];
+		int size=conn->recv(buf,10240);
+		cout<<"received. size="<<size<<endl;
+		cout<<"remote:"<<buf<<endl;
+		unsigned char msg[4096]="hello,dlrow!";
+		cout<<"say something:"<<endl;
+		cin>>msg;
+		size=conn->send(msg,4096);
+		cout<<"sent. size="<<size<<endl;
+		cout<<"local:"<<msg<<endl;
 	}
-
-
-
 	return 0;
 }
 

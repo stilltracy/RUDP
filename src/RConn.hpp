@@ -24,16 +24,23 @@ using namespace std;
 
 class RConn {
 private:
+	pthread_mutex_t lock_syn_buffer;
+    Buffer * syn_buffer;
 	static pthread_mutex_t lock_conn_count;
 	static int conn_count;
 	static int socket_fd;//all the connections share the same UDP socket
 	static pthread_mutex_t lock_buffer_router;
-	static map<in_addr_t, Buffer *> buffer_router;
+	static map<string, Buffer *> buffer_router;
+	/*the rx_buffer of a connecting RConn should have been in buffer_router after RConn(ip,port)*/
+	//static pthread_mutex_t lock_connecting_rconn;
+	//static RConn * connecting_rconn;
 	static pthread_mutex_t lock_listening_rconn;
 	static RConn * listening_rconn;
 	string ip;
 	int port;
-	in_addr_t remote_addr;
+	//in_addr_t remote_addr;
+	/*saved in order to be used in wipe_static_traces()*/
+	string buffer_key;
 	static pthread_t t_receiver;
 	static pthread_mutex_t lock_receiver_alive;
 	static bool receiver_alive;
@@ -53,6 +60,7 @@ private:
 	void send_fin2(unsigned int seq);
 	ErrorCode recv_control_msg(RUDPMsgType type, unsigned int expected_seq);
 	ErrorCode recv_control_msg(RUDPMsgType type, unsigned int expected_seq, unsigned int * p_remote_seq);
+	Packet * get_syn_packet();
 	ErrorCode recv_syn(unsigned int seq);
 	ErrorCode recv_control_msg_timeout(RUDPMsgType type,unsigned int expected_seq,int timeout);
 	ErrorCode recv_control_msg_timeout(RUDPMsgType type,unsigned int expected_seq,unsigned int * p_remote_seq,int timeout);
@@ -65,12 +73,14 @@ private:
 	void endReceiver();
 	static void * receiver(void * args);
 	static void on_receiver_exit();
+	static Buffer * find_rx_buffer(RConn * conn,string key);
+	static Buffer * find_buffer(string key, string ip_str,int port);
 	void send_ack(unsigned int seq);
 	void send_packet(Packet * p);
 	Packet * recv_next_packet();
 	Packet * recv_next_packet(RUDPMsgType type);
 	void on_close(unsigned int seq);
-
+	static void on_syn_received(Packet * p);
 	void disable_send();
 	void disable_recv();
 	bool is_sendable();

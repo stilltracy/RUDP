@@ -18,6 +18,7 @@ Config::Config()
 	CLOSE_TIMEOUT=1000000;
 	BUFFER_MAX_VOLUME=10240;//maximum buffer of 10KB
 	RECEIVER_BUFFER_MAX_VOLUME=102400;//maximum buffer of 100KB
+	SYN_BUFFER_MAX_VOLUME=128;
 }
 Config::~Config()
 {
