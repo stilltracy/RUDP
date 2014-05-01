@@ -12,7 +12,7 @@ using namespace std;
 using namespace rudp;
 int main() {
 	cout << "RUDP test!" << endl; // prints RUDP test!
-	string ip="158.130.56.128";
+	string ip="158.130.24.206";
 	int port =9526;
 	int remote_port=9527;
 	int status=0;
