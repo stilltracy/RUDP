@@ -57,12 +57,22 @@ Packet * Buffer::getPacket(RUDPMsgType type)
 Packet * Buffer::getPacket()
 {
 	pthread_mutex_lock(&this->lock);
-	Packet * p=NULL;
-	if(this->packets!=NULL)
+	Packet * p=this->packets;
+	Packet * last=NULL;
+	while(p!=NULL)
 	{
-		p=this->packets;
-		this->packets=p->next;
-		this->size-=p->size;
+		RUDPMsgHdr * h=p->parse_hdr();
+		if(h!=NULL&&h->type==MSG_TYPE_DATA)
+		{
+			this->size-=p->size;
+			if(last!=NULL)
+				last->next=p->next;
+			else
+				this->packets=p->next;
+			break;
+		}
+		last=p;
+		p=p->next;
 	}
 	pthread_mutex_unlock(&this->lock);
 	return p;
