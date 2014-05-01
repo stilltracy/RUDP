@@ -68,6 +68,7 @@ private:
 	void send_ack(unsigned int seq);
 	void send_packet(Packet * p);
 	Packet * recv_next_packet();
+	Packet * recv_next_packet(RUDPMsgType type);
 	void on_close(unsigned int seq);
 
 	void disable_send();

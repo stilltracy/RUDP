@@ -31,6 +31,29 @@ void * Buffer::getOwner()
 {
 	return this->owner;
 }
+Packet * Buffer::getPacket(RUDPMsgType type)
+{
+	pthread_mutex_lock(&this->lock);
+	Packet * p=this->packets;
+	Packet * last=NULL;
+	while(p!=NULL)
+	{
+		RUDPMsgHdr * h=p->parse_hdr();
+		if(h!=NULL&&h->type==type)
+		{
+			this->size-=p->size;
+			if(last!=NULL)
+				last->next=p->next;
+			else
+				this->packets=p->next;
+			break;
+		}
+		last=p;
+		p=p->next;
+	}
+	pthread_mutex_unlock(&this->lock);
+	return p;
+}
 Packet * Buffer::getPacket()
 {
 	pthread_mutex_lock(&this->lock);

@@ -91,6 +91,7 @@ private:
 	void * owner;
 public:
 	void * getOwner();
+	Packet * getPacket(RUDPMsgType type);
 	Packet * getPacket();
 	ErrorCode putPacket(Packet * p);
 	Buffer(void * owner,int maxVolume);

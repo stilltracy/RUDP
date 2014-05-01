@@ -102,13 +102,13 @@ ErrorCode RConn::recv_control_msg(RUDPMsgType type, unsigned int expected_seq, u
 	 ErrorCode err=ErrorCode::SUCCESS;
 	 while(true)
 	 {
-		 Packet * packet=recv_next_packet();
+		 Packet * packet=recv_next_packet(type);
 		 if(packet==NULL)
 			 continue;
 		 RUDPMsgHdr * hdr=packet->parse_hdr();
 		 if(hdr!=NULL)
 		 {
-			 if(hdr->type==type&&(p_remote_seq!=NULL||hdr->sequence==expected_seq))
+			 if(p_remote_seq!=NULL||hdr->sequence==expected_seq)
 			 {
 				 if(p_remote_seq!=NULL)
 					 *p_remote_seq=hdr->sequence;
@@ -165,7 +165,7 @@ ErrorCode RConn::recv_control_msg_timeout(RUDPMsgType type,unsigned int expected
 			 err=ErrorCode::TIME_OUT;
 			 break;
 		 }
-		 Packet * packet=recv_next_packet();
+		 Packet * packet=recv_next_packet(type);
 		 if(packet==NULL)
 			 continue;
 		 RUDPMsgHdr * hdr=packet->parse_hdr();
@@ -217,7 +217,13 @@ void RConn::endReceiver()
 	this->receiver_alive=false;
 	pthread_mutex_unlock(&this->lock_receiver_alive);
 }
-
+Packet * RConn::recv_next_packet(RUDPMsgType type)
+{
+	pthread_mutex_lock(&this->lock_rx_buffer);
+	Packet * p=this->rx_buffer->getPacket(type);
+	pthread_mutex_unlock(&this->lock_rx_buffer);
+	return p;
+}
 Packet * RConn::recv_next_packet()
 {
 	pthread_mutex_lock(&this->lock_rx_buffer);
