@@ -62,6 +62,7 @@ ErrorCode Buffer::putPacket(Packet * nb)
 		{
 			this->packets=nb;
 			this->size+=nb->size;
+		}
 		else
 		{
 			Packet * p=this->packets;
