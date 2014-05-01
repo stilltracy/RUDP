@@ -10,6 +10,25 @@
 #include "RConn.hpp"
 using namespace std;
 using namespace rudp;
+RConn * conn=NULL;
+
+void * wait_to_accept(void * args)
+{
+	int port =9527;
+	cout<<"accepting thread is running!"<<endl;
+	while(true)
+	{
+		conn=accept(port);
+		if(conn==NULL)
+			cout<<"accept failed!"<<endl;
+		else
+		{
+			cout<<"accept success!"<<endl;
+		}
+	}
+	return NULL;
+}
+
 int main() {
 	cout << "RUDP test!" << endl; // prints RUDP test!
 	string ip="158.130.24.206";
@@ -21,6 +40,10 @@ int main() {
 		perror("bind() failure.");
 		return -1;
 	}
+
+	pthread_t t;
+	pthread_create(&t,NULL,wait_to_accept,NULL);
+
 	RConn * conn=connect(ip,remote_port,&status);
 	if(conn==NULL)
 		cout<<"connect failed!"<<endl;
