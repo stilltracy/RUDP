@@ -335,6 +335,7 @@ void * RConn::receiver(void * args)
 		if(!receiver_alive)//die happily
 		{
 			on_receiver_exit();//die elegantly
+			pthread_mutex_unlock(&lock_receiver_alive);
 			break;
 		}
 		pthread_mutex_unlock(&lock_receiver_alive);

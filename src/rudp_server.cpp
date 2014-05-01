@@ -34,6 +34,9 @@ int main() {
 		unsigned char msg[13]="hello,dlrow!";
 		size=conn->send(msg,13);
 		cout<<"sent. size="<<size<<endl;
+		msg[0]='w';
+		size=conn->send(msg,13);
+		cout<<"sent. size="<<size<<endl;
 		while(true)
 		if(conn->is_closed())
 		{

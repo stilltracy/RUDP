@@ -34,6 +34,9 @@ int main() {
 		size=conn->recv(buf,10240);
 		cout<<"received. size="<<size<<endl;
 		cout<<buf<<endl;
+		size=conn->recv(buf,10240);
+		cout<<"received. size="<<size<<endl;
+		cout<<buf<<endl;
 		close(conn);
 		delete conn;
 	}
