@@ -475,6 +475,7 @@ int RConn::recv(unsigned char * buffer, int size)
 		if(this->recv_interrupted)
 		{
 			ret=0;
+			pthread_mutex_unlock(&this->lock_recv_interrupted);
 			break;
 		}
 		pthread_mutex_unlock(&this->lock_recv_interrupted);
