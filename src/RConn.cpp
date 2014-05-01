@@ -194,7 +194,10 @@ void RConn::startReceiver()
 {
 	pthread_mutex_lock(&this->lock_receiver_alive);
 	if(this->receiver_alive)//a receiver thread has already been started.
+	{
+		pthread_mutex_unlock(&this->lock_receiver_alive);
 		return;
+	}
 	pthread_attr_t attr;
 	pthread_attr_init(&attr);
 	pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_DETACHED);
