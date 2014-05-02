@@ -24,6 +24,13 @@ using namespace std;
 
 class RConn {
 private:
+
+	pthread_mutex_t lock_send;
+	pthread_mutex_t lock_recv;
+	//static pthread_mutex_t lock_connect;
+	static pthread_mutex_t lock_accept;
+
+
 	pthread_mutex_t lock_syn_buffer;
     Buffer * syn_buffer;
 	static pthread_mutex_t lock_conn_count;
@@ -99,10 +106,7 @@ public:
 
 };
 
- RConn * connect(string ip, int port, int * status);
- RConn * accept(int port);
- int bind(int port);
- void close(RConn * rconn);
+
 
 } /* namespace rudp */
 

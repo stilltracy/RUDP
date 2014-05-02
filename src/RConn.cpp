@@ -30,13 +30,17 @@ pthread_t RConn::t_receiver=-1;
 //RConn * RConn::connecting_rconn=NULL;
 pthread_mutex_t RConn::lock_listening_rconn=PTHREAD_MUTEX_INITIALIZER;
 RConn * RConn::listening_rconn=NULL;
-
+//pthread_mutex_t RConn::lock_connect=PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t RConn::lock_accept=PTHREAD_MUTEX_INITIALIZER;
 /*used by listening peer*/
 RConn::RConn() {
 	pthread_mutex_lock(&lock_conn_count);
 		conn_count++;
 	pthread_mutex_unlock(&lock_conn_count);
 	//memset(&remote_addr,0,sizeof(remote_addr));
+	lock_send=PTHREAD_MUTEX_INITIALIZER;
+	lock_recv=PTHREAD_MUTEX_INITIALIZER;
+
 	lock_syn_buffer=PTHREAD_MUTEX_INITIALIZER;
 	syn_buffer=new Buffer(this,DEFAULT_CONFIG->SYN_BUFFER_MAX_VOLUME);
 	lock_rx_buffer=PTHREAD_MUTEX_INITIALIZER;
@@ -61,6 +65,8 @@ RConn::RConn(string ip, int port)
 		conn_count++;
 	pthread_mutex_unlock(&lock_conn_count);
 	//memset(&remote_addr,0,sizeof(remote_addr));
+	lock_send=PTHREAD_MUTEX_INITIALIZER;
+	lock_recv=PTHREAD_MUTEX_INITIALIZER;
 	lock_syn_buffer=PTHREAD_MUTEX_INITIALIZER;
 	syn_buffer=new Buffer(this,DEFAULT_CONFIG->SYN_BUFFER_MAX_VOLUME);
 	this->lock_rx_buffer=PTHREAD_MUTEX_INITIALIZER;
@@ -511,170 +517,9 @@ bool RConn::is_closed()
 {
 	return this->state==RConnState::CLOSED;
 }
-int RConn::send(unsigned char * buffer, int size)
-{
-	if(!is_sendable())
-	{
-		perror("connection closed by peer.");
-		return -1;
-	}
-	int ret=size;
-	Packet * p=new Packet(sizeof(RUDPMsgHdr)+size);
-	p->make_msg(MSG_TYPE_DATA,this->localSeq,buffer);
-	ErrorCode err=ErrorCode::SUCCESS;
-	for(int i=0;i<this->config->TRANSMIT_MAX_RETRIES;i++)
-	{
-		send_packet(p);
-		err=recv_ack(this->localSeq);
-		if(err==ErrorCode::SUCCESS)
-		{
-			this->localSeq++;
-			delete p;
-			return size;
-		}
-	}
-	delete p;
-	ret=-1;
-	return ret;
-}
-int RConn::recv(unsigned char * buffer, int size)
-{
-	int ret=0;
-	Packet * p=NULL;
-	struct timeval start;
-	gettimeofday(&start,NULL);
-	while(true)
-	{
-		pthread_mutex_lock(&this->lock_recv_interrupted);
-		if(this->recv_interrupted)
-		{
-			ret=0;
-			pthread_mutex_unlock(&this->lock_recv_interrupted);
-			break;
-		}
-		pthread_mutex_unlock(&this->lock_recv_interrupted);
-		if((p=this->recv_next_packet())!=NULL
-				&&this->remoteSeq==p->parse_hdr()->sequence)
-		{
-			ret=p->unpack_data(buffer,size);
-			send_ack(this->remoteSeq);
-			this->remoteSeq++;
-			break;
-		}
-		else
-		{
-			if(check_timeout(this->config->RECV_REACK_TIMEOUT,start))
-			{
-				send_ack(this->remoteSeq-1);
-				gettimeofday(&start,NULL);
-			}
-			if(p!=NULL)
-				delete p;
-		}
-	}
-	delete p;
-	return ret;
-}
 void RConn::send_ack(unsigned int seq)
 {
 	send_control_msg(MSG_TYPE_ACK,seq);
 }
-RConn * connect(string ip, int port, int * status)
-{
-	RConn * conn =new RConn(ip,port);
-	conn->send_syn(0);
-	ErrorCode err=ErrorCode::SUCCESS;
-	for(int i=0;i<conn->config->CONNECT_MAX_RETRIES;i++)
-	{
-		err=conn->recv_ack(0);
-		if(err==ErrorCode::SUCCESS)
-			break;
-		else
-			conn->send_syn(0);
-	}
-	if(err!=ErrorCode::SUCCESS)
-	{
-		perror("No SYN_ACK received.");
-		return NULL;
-	}
-	conn->send_ack(1);
-	conn->state=RConnState::ESTABLISHED;
-	conn->localSeq=2;
-	conn->remoteSeq=2;
-	return conn;
-}
-RConn * accept(int port)
-{
-	RConn * conn =new RConn();
-	pthread_mutex_lock(&RConn::lock_listening_rconn);
-	RConn::listening_rconn=conn;
-	pthread_mutex_unlock(&RConn::lock_listening_rconn);
-	conn->recv_syn(0);
-	conn->send_ack(0);
-	ErrorCode err=ErrorCode::SUCCESS;
-	for(int i=0;i<conn->config->ACCEPT_MAX_RETRIES;i++)
-	{
-		err=conn->recv_control_msg_timeout(MSG_TYPE_ACK,1,NULL,conn->config->CONNECT_TIMEOUT);
-		if(err==ErrorCode::SUCCESS)
-			break;
-		else
-		{
-			conn->send_ack(0);
-		}
-	}
-	if(err!=ErrorCode::SUCCESS)
-	//if(conn->recv_msg(MSG_TYPE_ACK,1,NULL)!=ErrorCode::SUCCESS)
-	{
-		perror("No ACK(3) received.");
-		delete conn;
-		RConn::listening_rconn=NULL;
-		return NULL;
-	}
-	conn->state=RConnState::ESTABLISHED;
-	conn->localSeq=2;
-	conn->remoteSeq=2;
-	pthread_mutex_lock(&RConn::lock_listening_rconn);
-	RConn::listening_rconn=NULL;
-	pthread_mutex_unlock(&RConn::lock_listening_rconn);
-	return conn;
-}
-int bind(int port)
-{
-	struct sockaddr_in si_me;
-	si_me.sin_family=AF_INET;
-	si_me.sin_port=htons(port);
-	si_me.sin_addr.s_addr=htonl(INADDR_ANY);
-	return ::bind(RConn::socket_fd,(sockaddr *)&si_me, sizeof(si_me));
-}
-void close(RConn * rconn)
-{
-	rconn->disable_send();
-	unsigned int local_seq=rconn->localSeq;
-	rconn->send_fin1(local_seq);
-	ErrorCode err=ErrorCode::SUCCESS;
-	for(int i=0;i<rconn->config->CLOSE_MAX_RETRIES;i++)
-	{
-		err=rconn->recv_ack(local_seq);
-		if(err==ErrorCode::SUCCESS)
-			break;
-		else
-			rconn->send_fin1(local_seq);
-	}
-	if(err!=ErrorCode::SUCCESS)
-	{
-		perror("No ACK for FIN1 received.");
-	}
-	unsigned int seq=0;
-	err=rconn->recv_fin2(&seq);
-	if(err!=ErrorCode::SUCCESS)
-	{
-		perror("No FIN2 received.");
-	}
-	else
-	{
-		rconn->send_ack(seq);
-	}
-	//TODO: disable sender and receiver
-	rconn->disable_recv();
-}
+
 } /* namespace rudp */
