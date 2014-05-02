@@ -1,6 +1,6 @@
 RUDP
 ====
-Implemenation of Reliable User Datagram Protocol
+Implementation of Reliable User Datagram Protocol
 
 
 Yuanfeng Peng
